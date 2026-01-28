@@ -1,0 +1,3 @@
+aiohttp>=3.9
+windows-toasts>=1.0.0
+pyinstaller>=6.3
