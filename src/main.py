@@ -35,7 +35,9 @@ def ts_to_string(ts):
         return None
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=datetime.timezone.utc)
-    return ts.astimezone(datetime.timezone.utc).isoformat()
+    iso = ts.astimezone(datetime.timezone.utc).isoformat()
+    # Cloudflare GraphQL prefers Z-suffix; normalize.
+    return iso.replace("+00:00", "Z")
 
 
 def build_notification(zone_name, event):
@@ -82,6 +84,14 @@ async def poll_events():
         for zone in config["zone_ids"]:
             zone_names[zone] = await client.fetch_zone_name(zone)
 
+        logger.info("Running Cloudflare connectivity check for %d zones...", len(zone_names))
+        for zone_id, zone_name in zone_names.items():
+            events = await client.fetch_security_events(zone_id, since=None, per_page=1)
+            if events is None:
+                logger.error("Connection check failed for %s (%s).", zone_name, zone_id)
+            else:
+                logger.info("Connected to %s (%s).", zone_name, zone_id)
+
         while True:
             any_updates = False
             for zone_id in config["zone_ids"]:
@@ -89,6 +99,9 @@ async def poll_events():
                 since_dt = parse_timestamp(since_str) if since_str else None
 
                 events = await client.fetch_security_events(zone_id, since=since_str)
+                if events is None:
+                    # Previous logs already captured details; skip this zone for now.
+                    continue
                 new_events = []
                 for event in events:
                     ev_ts = event_timestamp(event)
