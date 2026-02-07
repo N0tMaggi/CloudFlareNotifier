@@ -20,11 +20,11 @@ if not logger.handlers:
     try:
         rotating_handler = RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=3)
         rotating_handler.setFormatter(formatter)
-        # Persist only warnings and errors to file to keep logs concise
+        
         rotating_handler.setLevel(logging.WARNING)
         logger.addHandler(rotating_handler)
     except Exception:
-        # If the file handler fails (e.g., permissions), keep console logging
+        print("[ ! ] Failed to set up file logging. Logs will only be output to the console.")
         pass
 
 

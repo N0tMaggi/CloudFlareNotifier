@@ -1,4 +1,3 @@
-# Hook every error and exception to log it properly
 from modules.importHandler import sys, threading
 from modules.loggingHandler import logger
 
@@ -7,7 +6,6 @@ def log_exceptions(exc_type, exc_value, exc_traceback):
     Handles uncaught exceptions in the main thread.
     """
     if issubclass(exc_type, KeyboardInterrupt):
-        # Call the default excepthook for KeyboardInterrupt
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
     logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
@@ -27,7 +25,7 @@ sys.excepthook = log_exceptions
 if hasattr(threading, 'excepthook'):
     threading.excepthook = log_thread_exceptions
     
-# Function to handle asyncio exceptions (optional usage in main)
+# Function to handle asyncio exceptions
 def handle_async_exception(loop, context):
     msg = context.get("exception", context.get("message"))
     logger.error(f"Caught exception in asyncio loop: {msg}")
