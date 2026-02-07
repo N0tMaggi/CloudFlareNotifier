@@ -158,7 +158,6 @@ class CloudflareConnectionManager:
                             "client_ip": ev.get("clientIP"),
                             "client_country_name": ev.get("clientCountryName"),
                             "rule_id": ev.get("ruleId"),
-                            # GraphQL schema may not expose rule_message; leave blank if absent
                             "rule_message": ev.get("ruleMessage") or "",
                             "ray_id": ev.get("rayName"),
                             "datetime": ev.get("datetime"),
