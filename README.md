@@ -24,7 +24,7 @@ Cross-platform Python service for Cloudflare security events. It polls Cloudflar
 flowchart LR
     CF[Cloudflare Security Events] -->|API token/key| Client[CloudFlareNotifier]
     Client --> Webhook[Discord Webhook]
-    Client --> Toast[Windows Toast UI (optional)]
+    Client --> Toast[Windows Toast UI optional]
     Client --> Logs[logs/app.log]
     Client --> State[state.json]
 ```
