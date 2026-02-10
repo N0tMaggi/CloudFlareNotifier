@@ -27,6 +27,17 @@ sudo ./install.sh
 This will create a virtual environment, install dependencies, generate a systemd service, and start it.
 Logs: `journalctl -u cloudflarenotifier -f`
 
+## Service commands (systemd)
+```bash
+sudo systemctl status cloudflarenotifier
+sudo systemctl start cloudflarenotifier
+sudo systemctl stop cloudflarenotifier
+sudo systemctl restart cloudflarenotifier
+sudo systemctl enable cloudflarenotifier
+sudo systemctl disable cloudflarenotifier
+journalctl -u cloudflarenotifier -f
+```
+
 ## First run (creates config)
 ```powershell
 python src/main.py
