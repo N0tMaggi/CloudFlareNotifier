@@ -1,3 +1,7 @@
 /*__pycache__*/
 *.pyc
 /modules/__pycache__/
+.env
+logs/
+state.json
+venv/

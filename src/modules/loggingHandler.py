@@ -1,10 +1,11 @@
 from modules.importHandler import logging, os
+from modules.paths import LOG_DIR
 from logging.handlers import RotatingFileHandler
 
-# Setup logging configuration in %appdata%/CloudFlareNotifier/logs
-log_dir = os.path.join(os.getenv('APPDATA'), 'CloudFlareNotifier', 'logs')
+# Setup logging configuration in local logs directory
+log_dir = str(LOG_DIR)
 os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, 'app.log')
+log_file = os.path.join(log_dir, "app.log")
 
 logger = logging.getLogger("CloudFlareNotifier")
 logger.setLevel(logging.INFO)

@@ -34,7 +34,6 @@ typing = _get_module("typing")
 
 # 3rd Party libraries
 aiohttp = _get_module("aiohttp")
-windows_toasts = _get_module("windows_toasts", "windows-toasts")
 
 importsOK = True
 
@@ -44,4 +43,3 @@ def imports_ready():
     Since loading this module runs the checks, this just returns True.
     """
     return importsOK
-

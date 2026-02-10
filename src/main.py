@@ -1,6 +1,7 @@
 from modules.importHandler import asyncio, datetime, time
 from modules.loggingHandler import logger
 from modules.notificationManager import NotificationManager
+from modules.embedBuilder import build_embed
 from modules.connectionManager import CloudflareConnectionManager
 from modules.configHandler import load_config, load_state, save_state
 import modules.errorHandling  # noqa: F401 - hooks global exception handling
@@ -66,7 +67,8 @@ def build_notification(zone_name, event):
 
 async def poll_events():
     config = load_config()
-    notifier = NotificationManager()
+    notifier = NotificationManager(config)
+    await notifier.start()
     state = load_state()
     last_seen = state.get("zones", {})
 
@@ -74,60 +76,65 @@ async def poll_events():
         minutes=config.get("lookback_minutes", 15)
     )
 
-    async with CloudflareConnectionManager(
-        api_token=config.get("api_token"),
-        api_key=config.get("api_key"),
-        email=config.get("email"),
-        verify_ssl=config.get("verify_ssl", True),
-    ) as client:
-        zone_names = {}
-        for zone in config["zone_ids"]:
-            zone_names[zone] = await client.fetch_zone_name(zone)
+    try:
+        async with CloudflareConnectionManager(
+            api_token=config.get("api_token"),
+            api_key=config.get("api_key"),
+            email=config.get("email"),
+            verify_ssl=config.get("verify_ssl", True),
+        ) as client:
+            zone_names = {}
+            for zone in config["zone_ids"]:
+                zone_names[zone] = await client.fetch_zone_name(zone)
 
-        logger.info("Running Cloudflare connectivity check for %d zones...", len(zone_names))
-        for zone_id, zone_name in zone_names.items():
-            events = await client.fetch_security_events(zone_id, since=None, per_page=1)
-            if events is None:
-                logger.error("Connection check failed for %s (%s).", zone_name, zone_id)
-            else:
-                logger.info("Connected to %s (%s).", zone_name, zone_id)
-
-        while True:
-            any_updates = False
-            for zone_id in config["zone_ids"]:
-                since_str = last_seen.get(zone_id) or ts_to_string(initial_cutoff)
-                since_dt = parse_timestamp(since_str) if since_str else None
-
-                events = await client.fetch_security_events(zone_id, since=since_str)
+            logger.info("Running Cloudflare connectivity check for %d zones...", len(zone_names))
+            for zone_id, zone_name in zone_names.items():
+                events = await client.fetch_security_events(zone_id, since=None, per_page=1)
                 if events is None:
-                    # Previous logs already captured details; skip this zone for now.
-                    continue
-                new_events = []
-                for event in events:
-                    ev_ts = event_timestamp(event)
-                    if since_dt and ev_ts and ev_ts <= since_dt:
+                    logger.error("Connection check failed for %s (%s).", zone_name, zone_id)
+                else:
+                    logger.info("Connected to %s (%s).", zone_name, zone_id)
+
+            while True:
+                any_updates = False
+                for zone_id in config["zone_ids"]:
+                    since_str = last_seen.get(zone_id) or ts_to_string(initial_cutoff)
+                    since_dt = parse_timestamp(since_str) if since_str else None
+
+                    events = await client.fetch_security_events(zone_id, since=since_str)
+                    if events is None:
+                        # Previous logs already captured details; skip this zone for now.
                         continue
-                    new_events.append((ev_ts, event))
+                    new_events = []
+                    for event in events:
+                        ev_ts = event_timestamp(event)
+                        if since_dt and ev_ts and ev_ts <= since_dt:
+                            continue
+                        new_events.append((ev_ts, event))
 
-                if not new_events:
-                    continue
+                    if not new_events:
+                        continue
 
-                new_events.sort(key=lambda item: item[0] or datetime.datetime.now(datetime.timezone.utc))
-                latest_ts = since_dt
-                for ev_ts, event in new_events:
-                    title, body = build_notification(zone_names.get(zone_id, zone_id), event)
-                    notifier.send_notification(title, body)
-                    any_updates = True
-                    if ev_ts:
-                        latest_ts = ev_ts if latest_ts is None else max(latest_ts, ev_ts)
+                    new_events.sort(key=lambda item: item[0] or datetime.datetime.now(datetime.timezone.utc))
+                    latest_ts = since_dt
+                    for ev_ts, event in new_events:
+                        zone_name = zone_names.get(zone_id, zone_id)
+                        title, body = build_notification(zone_name, event)
+                        embed = build_embed(zone_name, event, event_ts=ev_ts)
+                        await notifier.send_notification(title, body, embed=embed)
+                        any_updates = True
+                        if ev_ts:
+                            latest_ts = ev_ts if latest_ts is None else max(latest_ts, ev_ts)
 
-                if latest_ts:
-                    last_seen[zone_id] = ts_to_string(latest_ts)
+                    if latest_ts:
+                        last_seen[zone_id] = ts_to_string(latest_ts)
 
-            if any_updates:
-                save_state({"zones": last_seen})
+                if any_updates:
+                    save_state({"zones": last_seen})
 
-            await asyncio.sleep(config.get("poll_interval", 60))
+                await asyncio.sleep(config.get("poll_interval", 60))
+    finally:
+        await notifier.close()
 
 
 def main():
