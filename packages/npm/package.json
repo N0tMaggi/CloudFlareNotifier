@@ -1,5 +1,5 @@
 {
-  "name": "@n0tmaggi/cloudflare-notifier",
+  "name": "@maggidev/cloudflare-notifier",
   "version": "0.1.1",
   "description": "Poll Cloudflare security events and react to them in Node.js apps.",
   "main": "dist/index.js",

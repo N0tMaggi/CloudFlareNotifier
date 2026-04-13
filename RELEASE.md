@@ -1,6 +1,6 @@
 # Releasing
 
-## npm — `@n0tmaggi/cloudflare-notifier`
+## npm — `@maggidev/cloudflare-notifier`
 
 Releases are triggered by pushing a `v*` tag. The
 [publish-npm workflow](.github/workflows/publish-npm.yml) runs automatically:
