@@ -1,7 +1,25 @@
-/*__pycache__*/
+# Python
+**/__pycache__/
 *.pyc
-/modules/__pycache__/
+*.pyo
+*.egg-info/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+packages/npm/dist/
+
+# Runtime / secrets
 .env
 logs/
 state.json
-venv/
+
+# Editor / OS
+.cl*/
+*DE.md
+.DS_Store
+Thumbs.db

@@ -1,0 +1,19 @@
+{
+  "name": "cloudflare-notifier",
+  "version": "0.1.0",
+  "description": "Poll Cloudflare security events and react to them in Node.js apps.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "files": ["dist"],
+  "license": "MIT"
+}

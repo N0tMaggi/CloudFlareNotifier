@@ -1,56 +1,209 @@
-# CloudFlareNotifier
-[![Cloudflare badge](https://img.shields.io/badge/Cloudflare-Security%20Events-f38020?logo=cloudflare&logoColor=white)](https://www.cloudflare.com)
-[![Python badge](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+# cloudflare-notifier
 
-Cross-platform Python service for Cloudflare security events. It polls Cloudflare's APIs for your zones and surfaces new security events via Discord webhooks and optional Windows toast notifications.
+[![PyPI](https://img.shields.io/pypi/v/cloudflare-notifier?label=PyPI)](https://pypi.org/project/cloudflare-notifier/)
+[![Python](https://img.shields.io/pypi/pyversions/cloudflare-notifier)](https://pypi.org/project/cloudflare-notifier/)
+[![npm](https://img.shields.io/npm/v/cloudflare-notifier?label=npm)](https://www.npmjs.com/package/cloudflare-notifier)
+[![npm downloads](https://img.shields.io/npm/dm/cloudflare-notifier)](https://www.npmjs.com/package/cloudflare-notifier)
+[![CI](https://img.shields.io/github/actions/workflow/status/N0tMaggi/CloudFlareNotifier/pip-audit.yml?label=security+audit)](https://github.com/N0tMaggi/CloudFlareNotifier/actions)
+[![License](https://img.shields.io/github/license/N0tMaggi/CloudFlareNotifier)](LICENSE)
 
-## Why this exists
-- Keep personal or small-team sites observable without a full SIEM stack.
-- Discord embeds with attack-vector context are easy to share with teams.
-- Optional Windows toasts on Windows hosts.
-- One `.env` config file and persistent state to prevent duplicate pings.
+Poll Cloudflare security events in Python or Node.js. Register a handler, get called on every new event. No built-in notifications, no opinions on what you do next.
 
-## Highlights
-- Rich embeds: action/outcome, source, client IP, country, rule message, Ray ID, attack-vector description.
-- Multiple zones in one process.
-- Stateful deduplication via `state.json` in the project folder.
-- `.env` template is created on first run.
-- Works with Cloudflare API token (preferred) or legacy Global API key.
+---
 
-## Visuals
-- **Notification example**: title `example.com: block`; body `Firewall - 203.0.113.5 (DE) | SQLi detected | Ray ID: 6e4d7f0abc123456`.
-- **Data flow**:
-```mermaid
-flowchart LR
-    CF[Cloudflare Security Events] -->|API token/key| Client[CloudFlareNotifier]
-    Client --> Webhook[Discord Webhook]
-    Client --> Toast[Windows Toast UI optional]
-    Client --> Logs[logs/app.log]
-    Client --> State[state.json]
+## The problem
+
+Cloudflare doesn't push security events — you have to poll. Doing this yourself means:
+
+- Three different API endpoints depending on your plan (`/security/events`, `/firewall/events`, GraphQL `firewallEventsAdaptive`)
+- Inconsistent field names between REST and GraphQL responses
+- Deduplication logic to avoid re-processing events across restarts
+- Timestamp normalization across different Cloudflare event formats
+
+This library handles all of that. You write the handler.
+
+---
+
+## Install
+
+**Python** (requires 3.10+, one dependency: `aiohttp`):
+```bash
+pip install cloudflare-notifier
 ```
 
-## Quick install
-Full guide: [INSTALL.md](INSTALL.md). Short version:
-```powershell
-python -m pip install -r requirements.txt
-python src/main.py
+**Node.js** (requires 18+, zero runtime dependencies):
+```bash
+npm install cloudflare-notifier
 ```
-- First start writes `.env` in the project folder and exits with a message.
-- Fill `CLOUDFLARE_API_TOKEN` **or** (`CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL`), set `CLOUDFLARE_ZONE_IDS`, tweak `POLL_INTERVAL`, `LOOKBACK_MINUTES`, `VERIFY_SSL` as needed.
-- Set `WEBHOOK_URL` to enable Discord embeds. For non-Windows servers, set `NO_WINDOWS_SERVER=true`.
 
-## Running
-```powershell
-python src/main.py
+---
+
+## Usage
+
+### Python
+
+```python
+import asyncio
+import os
+from cloudflare_notifier import CloudFlareWatcher, SecurityEvent
+
+watcher = CloudFlareWatcher(
+    api_token=os.environ["CF_API_TOKEN"],
+    zone_ids=["your_zone_id"],
+    poll_interval=60,        # seconds between polls (default: 60)
+    lookback_minutes=15,     # how far back to look on first start (default: 15)
+)
+
+@watcher.on_event
+async def handle(event: SecurityEvent) -> None:
+    print(f"{event.zone_name}: [{event.action}] {event.client_ip} ({event.country})")
+    print(f"  rule: {event.rule_message or event.rule_id}")
+    print(f"  ray:  {event.ray_id}")
+
+asyncio.run(watcher.start())
 ```
-Logs live at `logs/app.log`.
 
-## What a toast contains
-- Title: `<zone name>: <action>`
-- Body: `<source> - <client IP> (<country>) | <rule message> | Ray ID: <id>`
-- Missing fields in the event are omitted.
+Multiple handlers and multiple zones are both supported:
 
-## Operational notes
-- `lookback_minutes` defines the initial fetch window to avoid alert floods after downtime.
-- State is at `state.json`; delete it to force a full refresh.
-- No system tray icon: stop with `Ctrl+C` in the console or end the `CloudFlareNotifier` process in Task Manager. Restart with the same command. Config is always at `.env`.
+```python
+watcher = CloudFlareWatcher(
+    api_token=os.environ["CF_API_TOKEN"],
+    zone_ids=["zone_id_1", "zone_id_2"],
+)
+
+@watcher.on_event
+async def log_to_db(event: SecurityEvent) -> None:
+    await db.insert(event.raw)
+
+@watcher.on_event
+async def alert_on_block(event: SecurityEvent) -> None:
+    if event.action == "block":
+        await send_alert(event)
+```
+
+### Node.js / TypeScript
+
+```typescript
+import { CloudFlareWatcher, SecurityEvent } from "cloudflare-notifier";
+
+const watcher = new CloudFlareWatcher({
+    apiToken: process.env.CF_API_TOKEN!,
+    zoneIds: ["your_zone_id"],
+    pollInterval: 60,
+    lookbackMinutes: 15,
+});
+
+watcher.onEvent((event: SecurityEvent) => {
+    console.log(`${event.zoneName}: [${event.action}] ${event.clientIp} (${event.country})`);
+    console.log(`  rule: ${event.ruleMessage || event.ruleId}`);
+    console.log(`  ray:  ${event.rayId}`);
+});
+
+watcher.start();
+```
+
+Stop when needed:
+
+```typescript
+// stop after 10 minutes
+setTimeout(() => watcher.stop(), 10 * 60 * 1000);
+```
+
+---
+
+## API Reference
+
+### `CloudFlareWatcher`
+
+| Parameter | Python | TypeScript | Default | Description |
+|-----------|--------|-----------|---------|-------------|
+| API token | `api_token` | `apiToken` | — | Recommended auth method |
+| API key | `api_key` | `apiKey` | — | Legacy — requires `email` |
+| Email | `email` | `email` | — | Required with `api_key` |
+| Zone IDs | `zone_ids` | `zoneIds` | required | List of Cloudflare zone IDs |
+| Poll interval | `poll_interval` | `pollInterval` | `60` | Seconds between polls |
+| Lookback | `lookback_minutes` | `lookbackMinutes` | `15` | Window on first start |
+| SSL verify | `verify_ssl` | — | `true` | Python only — see [Security](#security) |
+
+### `SecurityEvent` fields
+
+| Field | Python | TypeScript | Example |
+|-------|--------|-----------|---------|
+| Zone ID | `zone_id` | `zoneId` | `"abc123def456"` |
+| Zone name | `zone_name` | `zoneName` | `"example.com"` |
+| Action | `action` | `action` | `"block"`, `"challenge"`, `"log"` |
+| Source | `source` | `source` | `"firewall"`, `"waf"`, `"rateLimit"` |
+| Client IP | `client_ip` | `clientIp` | `"203.0.113.5"` |
+| Country | `country` | `country` | `"DE"` |
+| Rule ID | `rule_id` | `ruleId` | `"..."` |
+| Rule message | `rule_message` | `ruleMessage` | `"SQLi detected"` |
+| Ray ID | `ray_id` | `rayId` | `"6e4d7f0abc123456"` |
+| Timestamp | `occurred_at` | `occurredAt` | `datetime` / `Date \| null` |
+| Raw event | `raw` | `raw` | original dict / object from Cloudflare |
+
+Fields may be empty strings when Cloudflare omits them — always check before using.
+
+---
+
+## Auth
+
+Create a token at **Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token**.
+
+Minimum required permission: `Account Analytics → Read`. Scope it to only the zones you need.
+
+The legacy Global API Key (`api_key` + `email`) works but grants full account access — prefer a scoped token.
+
+---
+
+## Security
+
+**Keep credentials out of source code.** Use environment variables or a secrets manager:
+
+```python
+# Python
+api_token=os.environ["CF_API_TOKEN"]
+```
+```typescript
+// TypeScript
+apiToken: process.env.CF_API_TOKEN!
+```
+
+**Never set `verify_ssl=False` in production** (Python only). It disables TLS certificate verification entirely and makes your traffic vulnerable to MITM attacks. The library will emit a `UserWarning` if you do.
+
+**The library does not log credentials.** Exceptions from failed requests are logged at WARNING level via the standard `logging` module — they contain zone IDs and HTTP status codes, not tokens or keys.
+
+**Event data may contain personal information** (IP addresses, user agents). Handle it according to the privacy laws that apply to your users.
+
+---
+
+## How it works
+
+Both packages try Cloudflare's endpoints in this order, stopping at the first success:
+
+```
+1. GET /zones/{id}/security/events      (REST — newer plans)
+2. GET /zones/{id}/firewall/events      (REST — older plans)
+3. POST /graphql  firewallEventsAdaptive (GraphQL — all plans)
+```
+
+GraphQL field names are normalized to match REST field names before they reach your handler, so `SecurityEvent` always has the same shape regardless of which endpoint responded.
+
+Deduplication is in-memory per watcher instance using the `occurred_at` timestamp of the last seen event. State is not persisted — on restart, the watcher fetches events from the last `lookback_minutes` window.
+
+---
+
+## Development
+
+```bash
+# Python
+cd packages/python
+pip install -e ".[dev]"
+python -m pytest tests/ -v
+
+# TypeScript
+cd packages/npm
+npm install
+npm run build
+```
+
+Python tests cover `CloudFlareWatcher` construction, event handler registration, timestamp parsing, event mapping, dispatch error isolation, and the internal API client. Run them before submitting changes.

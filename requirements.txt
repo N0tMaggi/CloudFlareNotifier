@@ -1,2 +1,0 @@
-aiohttp>=3.9
-windows-toasts>=1.0.0 ; sys_platform == "win32"
