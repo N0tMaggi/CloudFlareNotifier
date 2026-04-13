@@ -3,13 +3,14 @@ import { CloudflareClient } from "./connection.js";
 import { SecurityEvent, WatcherConfig } from "./models.js";
 
 type EventHandler = (event: SecurityEvent) => void | Promise<void>;
+type ErrorHandler = (error: unknown) => void;
 
 /**
  * Poll Cloudflare security events and emit them as Node.js events.
  *
  * @example
  * ```ts
- * import { CloudFlareWatcher } from "cloudflare-notifier";
+ * import { CloudFlareWatcher } from "@maggidev/cloudflare-notifier";
  *
  * const watcher = new CloudFlareWatcher({
  *   apiToken: process.env.CF_TOKEN!,
@@ -29,6 +30,9 @@ export class CloudFlareWatcher extends EventEmitter {
   private lastSeen = new Map<string, Date>();
   private running = false;
   private timer: NodeJS.Timeout | null = null;
+  private polling = false;
+  private startPromise: Promise<void> | null = null;
+  private stopResolver: (() => void) | null = null;
 
   constructor(config: WatcherConfig) {
     super();
@@ -58,8 +62,15 @@ export class CloudFlareWatcher extends EventEmitter {
     return super.on("event", handler as (...args: unknown[]) => void);
   }
 
+  /** Register a handler for polling and event handler errors. */
+  onError(handler: ErrorHandler): this {
+    return super.on("error", handler as (...args: unknown[]) => void);
+  }
+
   /** Start polling. Resolves when stop() is called. */
   async start(): Promise<void> {
+    if (this.running && this.startPromise) return this.startPromise;
+
     this.running = true;
     const cutoff = new Date(Date.now() - this.config.lookbackMinutes * 60 * 1000);
 
@@ -69,17 +80,41 @@ export class CloudFlareWatcher extends EventEmitter {
       if (!this.lastSeen.has(zoneId)) this.lastSeen.set(zoneId, cutoff);
     }
 
-    return new Promise((resolve) => {
+    if (!this.running) return;
+
+    this.startPromise = new Promise((resolve) => {
+      this.stopResolver = () => {
+        this.stopResolver = null;
+        this.startPromise = null;
+        resolve();
+      };
+
       const tick = async (): Promise<void> => {
         if (!this.running) {
-          resolve();
+          this.resolveStopped();
           return;
         }
-        await this.poll(zoneNames);
+
+        this.polling = true;
+        try {
+          await this.poll(zoneNames);
+        } catch (error) {
+          this.emitError(error);
+        } finally {
+          this.polling = false;
+        }
+
+        if (!this.running) {
+          this.resolveStopped();
+          return;
+        }
+
         this.timer = setTimeout(tick, this.config.pollInterval * 1000);
       };
       void tick();
     });
+
+    return this.startPromise;
   }
 
   /** Stop polling after the current cycle completes. */
@@ -89,16 +124,22 @@ export class CloudFlareWatcher extends EventEmitter {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.resolveStopped();
   }
 
   private async poll(zoneNames: Map<string, string>): Promise<void> {
     for (const zoneId of this.config.zoneIds) {
+      if (!this.running) return;
       const since = this.lastSeen.get(zoneId);
       const rawEvents = await this.client.fetchSecurityEvents(
         zoneId,
         since ? toIsoZ(since) : undefined,
       );
-      if (!rawEvents) continue;
+      if (!this.running) return;
+      if (!rawEvents) {
+        this.emitError(new Error(`Failed to fetch Cloudflare security events for zone ${zoneId}.`));
+        continue;
+      }
 
       const newEvents: [Date | null, Record<string, unknown>][] = [];
       for (const raw of rawEvents) {
@@ -113,11 +154,38 @@ export class CloudFlareWatcher extends EventEmitter {
       let latest = since ?? null;
       for (const [evTs, raw] of newEvents) {
         const event = toEvent(zoneId, zoneNames.get(zoneId) ?? zoneId, raw, evTs);
-        this.emit("event", event);
+        await this.dispatchEvent(event);
         if (evTs) latest = latest ? (evTs > latest ? evTs : latest) : evTs;
       }
       if (latest) this.lastSeen.set(zoneId, latest);
     }
+  }
+
+  private async dispatchEvent(event: SecurityEvent): Promise<void> {
+    const handlers = this.listeners("event") as EventHandler[];
+    for (const handler of handlers) {
+      try {
+        await handler(event);
+      } catch (error) {
+        this.emitError(error);
+      }
+    }
+  }
+
+  private emitError(error: unknown): void {
+    if (this.listenerCount("error") > 0) {
+      super.emit("error", error);
+    }
+  }
+
+  private resolveStopped(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.running = false;
+    if (this.polling) return;
+    this.stopResolver?.();
   }
 }
 

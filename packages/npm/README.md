@@ -28,6 +28,10 @@ watcher.onEvent((event: SecurityEvent) => {
   console.log(`ray: ${event.rayId}`);
 });
 
+watcher.onError((error) => {
+  console.error("Cloudflare polling failed:", error);
+});
+
 watcher.start();
 ```
 
@@ -64,7 +68,12 @@ GraphQL field names are normalized so your handler receives the same `SecurityEv
 
 ## Security
 
-Use a scoped Cloudflare API token with the minimum required read permissions. Do not commit credentials; pass them through environment variables or a secrets manager.
+Use a scoped Cloudflare API token with read-only permissions:
+
+- `Zone -> Zone -> Read` for zone lookup
+- `Account -> Account Analytics -> Read` for GraphQL security event fallback
+
+Scope the token to only the zones/accounts you need. Do not commit credentials; pass them through environment variables or a secrets manager.
 
 ## Repository
 

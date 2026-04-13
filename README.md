@@ -149,7 +149,12 @@ Fields may be empty strings when Cloudflare omits them — always check before u
 
 Create a token at **Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token**.
 
-Minimum required permission: `Account Analytics → Read`. Scope it to only the zones you need.
+Recommended read-only permissions:
+
+- `Zone → Zone → Read` for zone lookup
+- `Account → Account Analytics → Read` for GraphQL security event fallback
+
+Scope the token to only the zones/accounts you need.
 
 The legacy Global API Key (`api_key` + `email`) works but grants full account access — prefer a scoped token.
 
