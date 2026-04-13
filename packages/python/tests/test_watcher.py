@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 
 import pytest
 
+import cloudflare_notifier.watcher as watcher_module
 from cloudflare_notifier import CloudFlareWatcher, SecurityEvent
 
 UTC = datetime.timezone.utc
@@ -66,6 +68,28 @@ class TestOnEvent:
         w.on_event(h1)
         w.on_event(h2)
         assert len(w._handlers) == 2
+
+
+# ------------------------------------------------------------------ on_error
+
+class TestOnError:
+    def test_decorator_registers_handler(self):
+        w = CloudFlareWatcher(api_token="tok", zone_ids=["z1"])
+
+        @w.on_error
+        async def handler(error: Exception) -> None:
+            pass
+
+        assert handler in w._error_handlers
+
+    def test_decorator_returns_original_function(self):
+        w = CloudFlareWatcher(api_token="tok", zone_ids=["z1"])
+
+        async def handler(error: Exception) -> None:
+            pass
+
+        result = w.on_error(handler)
+        assert result is handler
 
 
 # ------------------------------------------------------------------ _parse_ts
@@ -159,12 +183,49 @@ class TestDispatch:
     async def test_handler_exception_does_not_stop_others(self):
         w = CloudFlareWatcher(api_token="tok", zone_ids=["z1"])
         calls = []
+        errors = []
 
         async def bad(e): raise RuntimeError("oops")
         async def good(e): calls.append("good")
+        async def on_error(error): errors.append(str(error))
 
         w.on_event(bad)
         w.on_event(good)
+        w.on_error(on_error)
 
         await w._dispatch(CloudFlareWatcher._to_event("z", "z", {}, None))
         assert calls == ["good"]
+        assert errors == ["oops"]
+
+
+# ------------------------------------------------------------------ start / stop
+
+class _FakeClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return None
+
+    async def fetch_zone_name(self, zone_id):
+        return "example.com"
+
+    async def fetch_security_events(self, zone_id, *, since=None):
+        return []
+
+
+class TestStartStop:
+    @pytest.mark.asyncio
+    async def test_stop_wakes_poll_sleep(self, monkeypatch):
+        monkeypatch.setattr(
+            watcher_module,
+            "CloudflareConnectionManager",
+            lambda **_: _FakeClient(),
+        )
+
+        w = CloudFlareWatcher(api_token="tok", zone_ids=["z1"], poll_interval=30)
+        task = asyncio.create_task(w.start())
+        await asyncio.sleep(0.05)
+
+        await w.stop()
+        await asyncio.wait_for(task, timeout=0.5)

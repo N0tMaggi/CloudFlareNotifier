@@ -60,6 +60,10 @@ async def handle(event: SecurityEvent) -> None:
     print(f"  rule: {event.rule_message or event.rule_id}")
     print(f"  ray:  {event.ray_id}")
 
+@watcher.on_error
+async def handle_error(error: Exception) -> None:
+    print(f"Cloudflare polling failed: {error}")
+
 asyncio.run(watcher.start())
 ```
 

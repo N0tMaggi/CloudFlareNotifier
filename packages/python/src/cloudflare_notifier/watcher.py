@@ -11,6 +11,7 @@ from cloudflare_notifier._models import SecurityEvent
 logger = logging.getLogger(__name__)
 
 _Handler = Callable[[SecurityEvent], Awaitable[None]]
+_ErrorHandler = Callable[[Exception], Awaitable[None]]
 
 
 class CloudFlareWatcher:
@@ -58,8 +59,10 @@ class CloudFlareWatcher:
         self._verify_ssl = verify_ssl
 
         self._handlers: list[_Handler] = []
+        self._error_handlers: list[_ErrorHandler] = []
         self._last_seen: dict[str, datetime.datetime | None] = {}
         self._running = False
+        self._stop_event: asyncio.Event | None = None
 
     def on_event(self, func: _Handler) -> _Handler:
         """Register an async handler for every new security event.
@@ -75,31 +78,54 @@ class CloudFlareWatcher:
         self._handlers.append(func)
         return func
 
+    def on_error(self, func: _ErrorHandler) -> _ErrorHandler:
+        """Register an async handler for polling and event handler errors."""
+        self._error_handlers.append(func)
+        return func
+
     async def start(self) -> None:
         """Start polling. Blocks until :meth:`stop` is called or the task is cancelled."""
         self._running = True
+        self._stop_event = asyncio.Event()
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
             minutes=self._lookback_minutes
         )
 
-        async with CloudflareConnectionManager(
-            api_token=self._api_token,
-            api_key=self._api_key,
-            email=self._email,
-            verify_ssl=self._verify_ssl,
-        ) as client:
-            zone_names: dict[str, str] = {}
-            for zone_id in self._zone_ids:
-                zone_names[zone_id] = await client.fetch_zone_name(zone_id)
-                self._last_seen.setdefault(zone_id, cutoff)
+        try:
+            async with CloudflareConnectionManager(
+                api_token=self._api_token,
+                api_key=self._api_key,
+                email=self._email,
+                verify_ssl=self._verify_ssl,
+            ) as client:
+                zone_names: dict[str, str] = {}
+                for zone_id in self._zone_ids:
+                    zone_names[zone_id] = await client.fetch_zone_name(zone_id)
+                    self._last_seen.setdefault(zone_id, cutoff)
+                    if not self._running:
+                        return
 
-            while self._running:
-                await self._poll(client, zone_names)
-                await asyncio.sleep(self._poll_interval)
+                while self._running:
+                    await self._poll(client, zone_names)
+                    if not self._running:
+                        break
+
+                    stop_event = self._stop_event
+                    if stop_event is None:
+                        break
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=self._poll_interval)
+                    except TimeoutError:
+                        pass
+        finally:
+            self._running = False
+            self._stop_event = None
 
     async def stop(self) -> None:
         """Signal the polling loop to exit after the current cycle."""
         self._running = False
+        if self._stop_event:
+            self._stop_event.set()
 
     async def _poll(
         self,
@@ -107,11 +133,18 @@ class CloudFlareWatcher:
         zone_names: dict[str, str],
     ) -> None:
         for zone_id in self._zone_ids:
+            if not self._running:
+                return
             since = self._last_seen.get(zone_id)
             raw_events = await client.fetch_security_events(
                 zone_id, since=self._ts_str(since) if since else None
             )
+            if not self._running:
+                return
             if raw_events is None:
+                await self._dispatch_error(
+                    RuntimeError(f"Failed to fetch Cloudflare security events for zone {zone_id}.")
+                )
                 continue
 
             new: list[tuple[datetime.datetime | None, dict[str, object]]] = []
@@ -139,8 +172,16 @@ class CloudFlareWatcher:
         for handler in self._handlers:
             try:
                 await handler(event)
-            except Exception:
+            except Exception as exc:
                 logger.exception("Event handler raised for ray_id=%s", event.ray_id)
+                await self._dispatch_error(exc)
+
+    async def _dispatch_error(self, error: Exception) -> None:
+        for handler in self._error_handlers:
+            try:
+                await handler(error)
+            except Exception:
+                logger.exception("Error handler raised")
 
     # ------------------------------------------------------------------ helpers
 
