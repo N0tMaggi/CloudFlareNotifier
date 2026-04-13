@@ -1,0 +1,42 @@
+name: Publish npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build & publish to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: packages/npm/package-lock.json
+
+      - name: Install
+        working-directory: packages/npm
+        run: npm ci
+
+      - name: Type check
+        working-directory: packages/npm
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: packages/npm
+        run: npm run build
+
+      - name: Publish
+        working-directory: packages/npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}

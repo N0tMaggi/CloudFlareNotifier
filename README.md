@@ -2,8 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/cloudflare-notifier?label=PyPI)](https://pypi.org/project/cloudflare-notifier/)
 [![Python](https://img.shields.io/pypi/pyversions/cloudflare-notifier)](https://pypi.org/project/cloudflare-notifier/)
-[![npm](https://img.shields.io/npm/v/cloudflare-notifier?label=npm)](https://www.npmjs.com/package/cloudflare-notifier)
-[![npm downloads](https://img.shields.io/npm/dm/cloudflare-notifier)](https://www.npmjs.com/package/cloudflare-notifier)
+[![npm](https://img.shields.io/npm/v/%40n0tmaggi%2Fcloudflare-notifier?label=npm)](https://www.npmjs.com/package/@n0tmaggi/cloudflare-notifier)
+[![npm downloads](https://img.shields.io/npm/dm/%40n0tmaggi%2Fcloudflare-notifier)](https://www.npmjs.com/package/@n0tmaggi/cloudflare-notifier)
 [![CI](https://img.shields.io/github/actions/workflow/status/N0tMaggi/CloudFlareNotifier/pip-audit.yml?label=security+audit)](https://github.com/N0tMaggi/CloudFlareNotifier/actions)
 [![License](https://img.shields.io/github/license/N0tMaggi/CloudFlareNotifier)](LICENSE)
 
@@ -33,7 +33,7 @@ pip install cloudflare-notifier
 
 **Node.js** (requires 18+, zero runtime dependencies):
 ```bash
-npm install cloudflare-notifier
+npm install @n0tmaggi/cloudflare-notifier
 ```
 
 ---
@@ -84,7 +84,7 @@ async def alert_on_block(event: SecurityEvent) -> None:
 ### Node.js / TypeScript
 
 ```typescript
-import { CloudFlareWatcher, SecurityEvent } from "cloudflare-notifier";
+import { CloudFlareWatcher, SecurityEvent } from "@n0tmaggi/cloudflare-notifier";
 
 const watcher = new CloudFlareWatcher({
     apiToken: process.env.CF_API_TOKEN!,
