@@ -70,7 +70,7 @@ export class CloudflareClient {
         };
         if (res.status === 404) continue;
         if (data.errors?.some((e) => [7000, 7003].includes(e.code))) continue;
-        if (!res.ok || !data.success) return null;
+        if (!res.ok || !data.success) continue;
         return this.extractEvents(data.result);
       } catch {
         continue;
