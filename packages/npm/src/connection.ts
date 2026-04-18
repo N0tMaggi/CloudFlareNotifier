@@ -107,7 +107,7 @@ export class CloudflareClient {
               filter: { datetime_geq: $since }
             ) {
               action source clientIP clientCountryName
-              ruleId ruleMessage rayName datetime
+              ruleId rayName datetime
             }
           }
         }
@@ -139,7 +139,7 @@ export class CloudflareClient {
         client_ip: ev["clientIP"],
         client_country_name: ev["clientCountryName"],
         rule_id: ev["ruleId"],
-        rule_message: ev["ruleMessage"] ?? "",
+        rule_message: "",
         ray_id: ev["rayName"],
         datetime: ev["datetime"],
       }));
