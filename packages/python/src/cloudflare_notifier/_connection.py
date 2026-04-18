@@ -93,11 +93,11 @@ class CloudflareConnectionManager:
                     if any(e.get("code") in (7000, 7003) for e in payload.get("errors", [])):
                         continue
                     if resp.status != 200 or not payload.get("success", False):
-                        logger.error(
+                        logger.warning(
                             "Cloudflare API error [%s] for zone %s via %s: %s",
                             resp.status, zone_id, path, payload.get("errors"),
                         )
-                        return None
+                        continue
                     return self._extract_events(payload.get("result"))
             except Exception as exc:
                 logger.warning("Request failed for zone %s via %s: %s", zone_id, path, exc)
