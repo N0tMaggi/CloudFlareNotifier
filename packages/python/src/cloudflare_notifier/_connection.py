@@ -72,8 +72,8 @@ class CloudflareConnectionManager:
         zone_id: str,
         since: str | None = None,
         per_page: int = 50,
-    ) -> list[dict[str, object]] | None:
-        """Return a list of raw event dicts, or None on unrecoverable error."""
+    ) -> list[dict[str, object]]:
+        """Return a list of raw event dicts, or raise RuntimeError on unrecoverable error."""
         await self._start()
         params: dict[str, str | int] = {"per_page": per_page, "page": 1}
         if since:
