@@ -19,6 +19,7 @@ interface ConnectionConfig {
 export class CloudflareClient {
   private config: ConnectionConfig;
   private zoneCache = new Map<string, string>();
+  private ruleMessageSupport = new Map<string, boolean>();
 
   constructor(config: ConnectionConfig) {
     this.config = config;
@@ -97,7 +98,9 @@ export class CloudflareClient {
     const fallbackSince =
       since ?? new Date(Date.now() - 60 * 60 * 1000).toISOString().replace("+00:00", "Z");
 
-    const query = `
+    const useRuleMessage = this.ruleMessageSupport.get(zoneId) !== false;
+
+    const buildQuery = (withRuleMessage: boolean) => `
       query($zone: String!, $limit: Int!, $since: Time!) {
         viewer {
           zones(filter: { zoneTag: $zone }) {
@@ -107,42 +110,59 @@ export class CloudflareClient {
               filter: { datetime_geq: $since }
             ) {
               action source clientIP clientCountryName
-              ruleId rayName datetime
+              ruleId${withRuleMessage ? " ruleMessage" : ""} rayName datetime
             }
           }
         }
       }
     `;
 
-    try {
+    const attempt = async (withRuleMessage: boolean): Promise<RawEvent[]> => {
       const res = await fetch(GRAPHQL_URL, {
         method: "POST",
         headers: this.headers(),
-        body: JSON.stringify({ query, variables: { zone: zoneId, limit, since: fallbackSince } }),
+        body: JSON.stringify({
+          query: buildQuery(withRuleMessage),
+          variables: { zone: zoneId, limit, since: fallbackSince },
+        }),
       });
       const data = (await res.json()) as {
         errors?: { message?: string }[];
         data?: { viewer?: { zones?: { firewallEventsAdaptive?: RawEvent[] }[] } };
       };
-      if (!res.ok || data.errors) {
-        const detail = data.errors?.map((e) => e.message ?? "").join(", ");
-        priorFailures.push(`graphql: HTTP ${res.status}${detail ? ` – ${detail}` : ""}`);
-        throw new Error(
-          `All Cloudflare endpoints failed for zone ${zoneId}:\n  ${priorFailures.join("\n  ")}`,
-        );
+
+      if (res.ok && !data.errors) {
+        if (withRuleMessage) this.ruleMessageSupport.set(zoneId, true);
+        const events = data?.data?.viewer?.zones?.[0]?.firewallEventsAdaptive ?? [];
+        return events.map((ev) => ({
+          action: ev["action"],
+          source: ev["source"],
+          client_ip: ev["clientIP"],
+          client_country_name: ev["clientCountryName"],
+          rule_id: ev["ruleId"],
+          rule_message: withRuleMessage ? String(ev["ruleMessage"] ?? "") : "",
+          ray_id: ev["rayName"],
+          datetime: ev["datetime"],
+        }));
       }
 
-      const events = data?.data?.viewer?.zones?.[0]?.firewallEventsAdaptive ?? [];
-      return events.map((ev) => ({
-        action: ev["action"],
-        source: ev["source"],
-        client_ip: ev["clientIP"],
-        client_country_name: ev["clientCountryName"],
-        rule_id: ev["ruleId"],
-        rule_message: "",
-        ray_id: ev["rayName"],
-        datetime: ev["datetime"],
-      }));
+      const isRuleMessageError = data.errors?.some((e) =>
+        e.message?.includes("unknown field") && e.message.includes("ruleMessage"),
+      );
+      if (withRuleMessage && isRuleMessageError) {
+        this.ruleMessageSupport.set(zoneId, false);
+        return attempt(false);
+      }
+
+      const detail = data.errors?.map((e) => e.message ?? "").join(", ");
+      priorFailures.push(`graphql: HTTP ${res.status}${detail ? ` – ${detail}` : ""}`);
+      throw new Error(
+        `All Cloudflare endpoints failed for zone ${zoneId}:\n  ${priorFailures.join("\n  ")}`,
+      );
+    };
+
+    try {
+      return await attempt(useRuleMessage);
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("All Cloudflare endpoints failed")) throw err;
       priorFailures.push(`graphql: ${String(err)}`);

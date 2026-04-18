@@ -140,12 +140,14 @@ setTimeout(() => watcher.stop(), 10 * 60 * 1000);
 | Client IP | `client_ip` | `clientIp` | `"203.0.113.5"` |
 | Country | `country` | `country` | `"DE"` |
 | Rule ID | `rule_id` | `ruleId` | `"..."` |
-| Rule message | `rule_message` | `ruleMessage` | `"SQLi detected"` |
+| Rule message | `rule_message` | `ruleMessage` | `"SQLi detected"` ¹ |
 | Ray ID | `ray_id` | `rayId` | `"6e4d7f0abc123456"` |
 | Timestamp | `occurred_at` | `occurredAt` | `datetime` / `Date \| null` |
 | Raw event | `raw` | `raw` | original dict / object from Cloudflare |
 
 Fields may be empty strings when Cloudflare omits them — always check before using.
+
+¹ `rule_message` / `ruleMessage` is only populated on **Enterprise** plans. The library auto-detects this per zone: it first requests the field, and if Cloudflare rejects it, retries without — no configuration needed. The field will simply be an empty string on Free/Pro/Business zones.
 
 ---
 
@@ -196,6 +198,8 @@ Both packages try Cloudflare's endpoints in this order, stopping at the first su
 ```
 
 GraphQL field names are normalized to match REST field names before they reach your handler, so `SecurityEvent` always has the same shape regardless of which endpoint responded.
+
+The GraphQL query adapts automatically per zone: `ruleMessage` is requested if the zone supports it (Enterprise), and silently dropped for zones that don't. This is detected on the first poll and cached for the lifetime of the watcher instance.
 
 Deduplication is in-memory per watcher instance using the `occurred_at` timestamp of the last seen event. State is not persisted — on restart, the watcher fetches events from the last `lookback_minutes` window.
 
