@@ -97,14 +97,19 @@ class CloudflareConnectionManager:
                         continue
                     if resp.status != 200 or not payload.get("success", False):
                         errs = payload.get("errors") or []
-                        detail = ", ".join(f"[{e.get('code')}] {e.get('message','')}" for e in errs)
-                        failures.append(f"{path}: HTTP {resp.status}{f' – {detail}' if detail else ''}")
+                        detail = ", ".join(
+                            f"[{e.get('code')}] {e.get('message', '')}" for e in errs
+                        )
+                        suffix = f" – {detail}" if detail else ""
+                        failures.append(f"{path}: HTTP {resp.status}{suffix}")
                         continue
                     return self._extract_events(payload.get("result"))
             except Exception as exc:
                 failures.append(f"{path}: {exc}")
 
-        return await self._fetch_graphql(zone_id, since=since, limit=per_page, prior_failures=failures)
+        return await self._fetch_graphql(
+            zone_id, since=since, limit=per_page, prior_failures=failures
+        )
 
     async def _fetch_graphql(
         self,
@@ -171,7 +176,9 @@ class CloudflareConnectionManager:
                             "client_ip": ev.get("clientIP"),
                             "client_country_name": ev.get("clientCountryName"),
                             "rule_id": ev.get("ruleId"),
-                            "rule_message": ev.get("ruleMessage") or "" if with_rule_message else "",
+                            "rule_message": (
+                                ev.get("ruleMessage") or "" if with_rule_message else ""
+                            ),
                             "ray_id": ev.get("rayName"),
                             "datetime": ev.get("datetime"),
                         }
@@ -179,7 +186,8 @@ class CloudflareConnectionManager:
                     ]
 
                 is_rule_message_error = with_rule_message and any(
-                    "unknown field" in (e.get("message") or "") and "ruleMessage" in (e.get("message") or "")
+                    "unknown field" in (e.get("message") or "")
+                    and "ruleMessage" in (e.get("message") or "")
                     for e in errors
                 )
                 if is_rule_message_error:
@@ -187,9 +195,11 @@ class CloudflareConnectionManager:
                     return await attempt(False)
 
                 detail = ", ".join(e.get("message", "") for e in errors)
-                failures.append(f"graphql: HTTP {resp.status}{f' – {detail}' if detail else ''}")
+                suffix = f" – {detail}" if detail else ""
+                failures.append(f"graphql: HTTP {resp.status}{suffix}")
                 raise RuntimeError(
-                    f"All Cloudflare endpoints failed for zone {zone_id}:\n  " + "\n  ".join(failures)
+                    f"All Cloudflare endpoints failed for zone {zone_id}:\n  "
+                    + "\n  ".join(failures)
                 )
 
         try:
