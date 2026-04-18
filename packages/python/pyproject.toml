@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cloudflare-notifier"
-version = "0.1.0"
+version = "0.1.1"
 description = "Poll Cloudflare security events and react to them in Python apps."
 requires-python = ">=3.10"
 dependencies = [

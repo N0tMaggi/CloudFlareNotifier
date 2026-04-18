@@ -136,16 +136,15 @@ class CloudFlareWatcher:
             if not self._running:
                 return
             since = self._last_seen.get(zone_id)
-            raw_events = await client.fetch_security_events(
-                zone_id, since=self._ts_str(since) if since else None
-            )
+            try:
+                raw_events = await client.fetch_security_events(
+                    zone_id, since=self._ts_str(since) if since else None
+                )
+            except Exception as exc:
+                await self._dispatch_error(exc)
+                continue
             if not self._running:
                 return
-            if raw_events is None:
-                await self._dispatch_error(
-                    RuntimeError(f"Failed to fetch Cloudflare security events for zone {zone_id}.")
-                )
-                continue
 
             new: list[tuple[datetime.datetime | None, dict[str, object]]] = []
             for raw in raw_events:

@@ -41,6 +41,7 @@ class CloudflareConnectionManager:
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session: aiohttp.ClientSession | None = None
         self._zone_cache: dict[str, str] = {}
+        self._rule_message_support: dict[str, bool] = {}
 
     async def __aenter__(self) -> CloudflareConnectionManager:
         await self._start()
@@ -78,6 +79,8 @@ class CloudflareConnectionManager:
         if since:
             params["since"] = since
 
+        failures: list[str] = []
+
         for path in (
             f"/zones/{zone_id}/security/events",
             f"/zones/{zone_id}/firewall/events",
@@ -93,85 +96,111 @@ class CloudflareConnectionManager:
                     if any(e.get("code") in (7000, 7003) for e in payload.get("errors", [])):
                         continue
                     if resp.status != 200 or not payload.get("success", False):
-                        logger.warning(
-                            "Cloudflare API error [%s] for zone %s via %s: %s",
-                            resp.status, zone_id, path, payload.get("errors"),
-                        )
+                        errs = payload.get("errors") or []
+                        detail = ", ".join(f"[{e.get('code')}] {e.get('message','')}" for e in errs)
+                        failures.append(f"{path}: HTTP {resp.status}{f' – {detail}' if detail else ''}")
                         continue
                     return self._extract_events(payload.get("result"))
             except Exception as exc:
-                logger.warning("Request failed for zone %s via %s: %s", zone_id, path, exc)
+                failures.append(f"{path}: {exc}")
 
-        return await self._fetch_graphql(zone_id, since=since, limit=per_page)
+        return await self._fetch_graphql(zone_id, since=since, limit=per_page, prior_failures=failures)
 
     async def _fetch_graphql(
         self,
         zone_id: str,
         since: str | None = None,
         limit: int = 50,
-    ) -> list[dict[str, object]] | None:
+        prior_failures: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         await self._start()
+        failures = prior_failures or []
         if not since:
             since = (
                 datetime.datetime.now(datetime.timezone.utc)
                 - datetime.timedelta(minutes=60)
             ).isoformat().replace("+00:00", "Z")
 
-        query = """
-        query($zone: String!, $limit: Int!, $since: Time!) {
-          viewer {
-            zones(filter: { zoneTag: $zone }) {
+        use_rule_message = self._rule_message_support.get(zone_id) is not False
+
+        def build_query(with_rule_message: bool) -> str:
+            extra = " ruleMessage" if with_rule_message else ""
+            return f"""
+        query($zone: String!, $limit: Int!, $since: Time!) {{
+          viewer {{
+            zones(filter: {{ zoneTag: $zone }}) {{
               firewallEventsAdaptive(
                 limit: $limit
                 orderBy: [datetime_DESC]
-                filter: { datetime_geq: $since }
-              ) {
+                filter: {{ datetime_geq: $since }}
+              ) {{
                 action source clientIP clientCountryName
-                ruleId ruleMessage rayName datetime
-              }
-            }
-          }
-        }
+                ruleId{extra} rayName datetime
+              }}
+            }}
+          }}
+        }}
         """
-        try:
+
+        async def attempt(with_rule_message: bool) -> list[dict[str, object]]:
             async with self.session.post(  # type: ignore[union-attr]
                 self.graphql_url,
                 json={
-                    "query": query,
+                    "query": build_query(with_rule_message),
                     "variables": {"zone": zone_id, "limit": limit, "since": since},
                 },
                 headers=self._headers(),
                 ssl=self.verify_ssl,
             ) as resp:
                 data = await resp.json(content_type=None)
-                if resp.status != 200 or data.get("errors"):
-                    logger.error(
-                        "GraphQL error [%s] for zone %s: %s",
-                        resp.status, zone_id, data.get("errors"),
-                    )
-                    return None
-                events = (
-                    data.get("data", {})
-                    .get("viewer", {})
-                    .get("zones", [{}])[0]
-                    .get("firewallEventsAdaptive", [])
-                ) or []
-                return [
-                    {
-                        "action": ev.get("action"),
-                        "source": ev.get("source"),
-                        "client_ip": ev.get("clientIP"),
-                        "client_country_name": ev.get("clientCountryName"),
-                        "rule_id": ev.get("ruleId"),
-                        "rule_message": ev.get("ruleMessage") or "",
-                        "ray_id": ev.get("rayName"),
-                        "datetime": ev.get("datetime"),
-                    }
-                    for ev in events
-                ]
+                errors = data.get("errors") or []
+
+                if resp.status == 200 and not errors:
+                    if with_rule_message:
+                        self._rule_message_support[zone_id] = True
+                    events = (
+                        data.get("data", {})
+                        .get("viewer", {})
+                        .get("zones", [{}])[0]
+                        .get("firewallEventsAdaptive", [])
+                    ) or []
+                    return [
+                        {
+                            "action": ev.get("action"),
+                            "source": ev.get("source"),
+                            "client_ip": ev.get("clientIP"),
+                            "client_country_name": ev.get("clientCountryName"),
+                            "rule_id": ev.get("ruleId"),
+                            "rule_message": ev.get("ruleMessage") or "" if with_rule_message else "",
+                            "ray_id": ev.get("rayName"),
+                            "datetime": ev.get("datetime"),
+                        }
+                        for ev in events
+                    ]
+
+                is_rule_message_error = with_rule_message and any(
+                    "unknown field" in (e.get("message") or "") and "ruleMessage" in (e.get("message") or "")
+                    for e in errors
+                )
+                if is_rule_message_error:
+                    self._rule_message_support[zone_id] = False
+                    return await attempt(False)
+
+                detail = ", ".join(e.get("message", "") for e in errors)
+                failures.append(f"graphql: HTTP {resp.status}{f' – {detail}' if detail else ''}")
+                raise RuntimeError(
+                    f"All Cloudflare endpoints failed for zone {zone_id}:\n  " + "\n  ".join(failures)
+                )
+
+        try:
+            return await attempt(use_rule_message)
+        except RuntimeError:
+            raise
         except Exception as exc:
-            logger.error("GraphQL request failed for zone %s: %s", zone_id, exc)
-            return None
+            failures.append(f"graphql: {exc}")
+            raise RuntimeError(
+                f"All Cloudflare endpoints failed for zone {zone_id}:\n  " + "\n  ".join(failures)
+            ) from exc
 
     async def fetch_zone_name(self, zone_id: str) -> str:
         """Resolve and cache the human-readable zone name."""
