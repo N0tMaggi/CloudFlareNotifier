@@ -53,9 +53,10 @@ export class CloudflareClient {
     zoneId: string,
     since?: string,
     perPage = 50,
-  ): Promise<RawEvent[] | null> {
+  ): Promise<RawEvent[]> {
     const params = new URLSearchParams({ per_page: String(perPage), page: "1" });
     if (since) params.set("since", since);
+    const failures: string[] = [];
 
     for (const path of [
       `/zones/${zoneId}/security/events`,
@@ -66,24 +67,33 @@ export class CloudflareClient {
         const data = (await res.json()) as {
           success: boolean;
           result?: unknown;
-          errors?: { code: number }[];
+          errors?: { code: number; message?: string }[];
         };
         if (res.status === 404) continue;
         if (data.errors?.some((e) => [7000, 7003].includes(e.code))) continue;
-        if (!res.ok || !data.success) continue;
+        if (!res.ok || !data.success) {
+          const detail = data.errors
+            ?.map((e) => `[${e.code}] ${e.message ?? ""}`.trim())
+            .join(", ");
+          failures.push(`${path}: HTTP ${res.status}${detail ? ` – ${detail}` : ""}`);
+          continue;
+        }
         return this.extractEvents(data.result);
-      } catch {
+      } catch (err) {
+        failures.push(`${path}: ${String(err)}`);
         continue;
       }
     }
-    return this.fetchGraphQL(zoneId, since, perPage);
+
+    return this.fetchGraphQL(zoneId, since, perPage, failures);
   }
 
   private async fetchGraphQL(
     zoneId: string,
     since?: string,
     limit = 50,
-  ): Promise<RawEvent[] | null> {
+    priorFailures: string[] = [],
+  ): Promise<RawEvent[]> {
     const fallbackSince =
       since ?? new Date(Date.now() - 60 * 60 * 1000).toISOString().replace("+00:00", "Z");
 
@@ -111,10 +121,16 @@ export class CloudflareClient {
         body: JSON.stringify({ query, variables: { zone: zoneId, limit, since: fallbackSince } }),
       });
       const data = (await res.json()) as {
-        errors?: unknown;
+        errors?: { message?: string }[];
         data?: { viewer?: { zones?: { firewallEventsAdaptive?: RawEvent[] }[] } };
       };
-      if (!res.ok || data.errors) return null;
+      if (!res.ok || data.errors) {
+        const detail = data.errors?.map((e) => e.message ?? "").join(", ");
+        priorFailures.push(`graphql: HTTP ${res.status}${detail ? ` – ${detail}` : ""}`);
+        throw new Error(
+          `All Cloudflare endpoints failed for zone ${zoneId}:\n  ${priorFailures.join("\n  ")}`,
+        );
+      }
 
       const events = data?.data?.viewer?.zones?.[0]?.firewallEventsAdaptive ?? [];
       return events.map((ev) => ({
@@ -127,8 +143,12 @@ export class CloudflareClient {
         ray_id: ev["rayName"],
         datetime: ev["datetime"],
       }));
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("All Cloudflare endpoints failed")) throw err;
+      priorFailures.push(`graphql: ${String(err)}`);
+      throw new Error(
+        `All Cloudflare endpoints failed for zone ${zoneId}:\n  ${priorFailures.join("\n  ")}`,
+      );
     }
   }
 

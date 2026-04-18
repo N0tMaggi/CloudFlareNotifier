@@ -131,15 +131,17 @@ export class CloudFlareWatcher extends EventEmitter {
     for (const zoneId of this.config.zoneIds) {
       if (!this.running) return;
       const since = this.lastSeen.get(zoneId);
-      const rawEvents = await this.client.fetchSecurityEvents(
-        zoneId,
-        since ? toIsoZ(since) : undefined,
-      );
-      if (!this.running) return;
-      if (!rawEvents) {
-        this.emitError(new Error(`Failed to fetch Cloudflare security events for zone ${zoneId}.`));
+      let rawEvents: ReturnType<typeof this.client.fetchSecurityEvents> extends Promise<infer T> ? T : never;
+      try {
+        rawEvents = await this.client.fetchSecurityEvents(
+          zoneId,
+          since ? toIsoZ(since) : undefined,
+        );
+      } catch (err) {
+        this.emitError(err);
         continue;
       }
+      if (!this.running) return;
 
       const newEvents: [Date | null, Record<string, unknown>][] = [];
       for (const raw of rawEvents) {
