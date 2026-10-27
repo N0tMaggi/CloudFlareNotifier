@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ## [Unreleased]
 
+### Python: `cloudflare-notifier`
+
+#### Fixed
+
+- On Python 3.10 the watcher no longer crashes after the first poll interval (`asyncio.TimeoutError` is not the built-in `TimeoutError` there).
+
+#### Changed
+
+- Requires `aiohttp>=3.14`.
+
+## [0.2.0] - 2026-10-27
+
 ### npm: `@maggidev/cloudflare-notifier`
 
 #### Breaking
@@ -33,24 +45,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 - Calling `start()` twice no longer starts two polling loops.
 - `stop()` interrupts in-flight requests and the wait between polls.
 
-### Python: `cloudflare-notifier`
-
-#### Fixed
-
-- On Python 3.10 the watcher no longer crashes after the first poll interval (`asyncio.TimeoutError` is not the built-in `TimeoutError` there).
-
-#### Changed
-
-- Requires `aiohttp>=3.14`.
-
 ### Project
 
 - Updated tooling: TypeScript 7, Vitest 5, pytest 9, mypy 2, ruff 0.17.
 - CI tests Node.js 22, 24 and 26 and Python 3.10 to 3.14, and builds the npm package.
 - Added INSTALL, CONTRIBUTING and SECURITY guides, plus issue and pull request templates.
 
-## npm 0.1.x (2026-04)
+## [0.1.x] - 2026-04 (npm)
 
 First releases of `@maggidev/cloudflare-notifier`: `CloudFlareWatcher` with `onEvent` and `onError`. Events are read via REST with GraphQL as a fallback.
 
-[Unreleased]: https://github.com/N0tMaggi/CloudFlareNotifier/commits/main
+[Unreleased]: https://github.com/N0tMaggi/CloudFlareNotifier/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/N0tMaggi/CloudFlareNotifier/compare/v0.1.9...v0.2.0
