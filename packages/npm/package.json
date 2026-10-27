@@ -27,11 +27,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "vitest": "^3.2.7"
   },
   "files": [
     "dist",

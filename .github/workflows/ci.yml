@@ -63,3 +63,11 @@ jobs:
       - name: Type check (tsc)
         working-directory: packages/npm
         run: npm run typecheck
+
+      - name: Test
+        working-directory: packages/npm
+        run: npm test
+
+      - name: Build
+        working-directory: packages/npm
+        run: npm run build

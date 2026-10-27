@@ -128,6 +128,13 @@ setTimeout(() => watcher.stop(), 10 * 60 * 1000);
 | Poll interval | `poll_interval` | `pollInterval` | `60` | Seconds between polls |
 | Lookback | `lookback_minutes` | `lookbackMinutes` | `15` | Window on first start |
 | SSL verify | `verify_ssl` | — | `true` | Python only — see [Security](#security) |
+| Overlap | — | `overlap` | `300` | TypeScript only — seconds re-read each poll to catch late events |
+| Page size | — | `pageSize` | `1000` | TypeScript only — events per zone and page |
+| Request timeout | — | `requestTimeout` | `15` | Seconds per request (Python: fixed 15) |
+| Retries | — | `maxRetries` | `3` | TypeScript only — retries on network errors, timeouts, 429, 5xx |
+| Fetch | — | `fetch` | global `fetch` | TypeScript only — custom implementation (proxies, tests) |
+
+TypeScript validates zone IDs (32 hex characters) and numeric options in the constructor.
 
 ### `SecurityEvent` fields
 
@@ -142,12 +149,20 @@ setTimeout(() => watcher.stop(), 10 * 60 * 1000);
 | Rule ID | `rule_id` | `ruleId` | `"..."` |
 | Rule message | `rule_message` | `ruleMessage` | `"SQLi detected"` ¹ |
 | Ray ID | `ray_id` | `rayId` | `"6e4d7f0abc123456"` |
+| Host | — | `host` | `"shop.example.com"` ² |
+| Method | — | `method` | `"POST"` ² |
+| Path | — | `path` | `"/wp-login.php"` ² |
+| Query | — | `query` | `"?id=1%27"` ² |
+| User agent | — | `userAgent` | `"curl/8.5.0"` ² |
+| ASN | — | `asn` | `"64496"` ² |
 | Timestamp | `occurred_at` | `occurredAt` | `datetime` / `Date \| null` |
 | Raw event | `raw` | `raw` | original dict / object from Cloudflare |
 
 Fields may be empty strings when Cloudflare omits them — always check before using.
 
-¹ `rule_message` / `ruleMessage` is only populated on **Enterprise** plans. The library auto-detects this per zone: it first requests the field, and if Cloudflare rejects it, retries without — no configuration needed. The field will simply be an empty string on Free/Pro/Business zones.
+¹ TypeScript fills `ruleMessage` from the GraphQL `description` field. Python still requests `ruleMessage` and leaves it empty when Cloudflare rejects it.
+
+² TypeScript only. On first use the client introspects the GraphQL schema and requests only the fields it exposes; if introspection is unavailable it falls back to a minimal field set. `path`, `query` and `userAgent` are attacker-controlled — escape them before rendering in a dashboard.
 
 ---
 
@@ -158,7 +173,7 @@ Create a token at **Cloudflare dashboard → My Profile → API Tokens → Creat
 Recommended read-only permissions:
 
 - `Zone → Zone → Read` for zone lookup
-- `Account → Account Analytics → Read` for GraphQL security event fallback
+- `Zone → Analytics → Read` for security events via GraphQL
 
 Scope the token to only the zones/accounts you need.
 
@@ -189,7 +204,21 @@ apiToken: process.env.CF_API_TOKEN!
 
 ## How it works
 
-Both packages try Cloudflare's endpoints in this order, stopping at the first success:
+### TypeScript
+
+Security events come only from the GraphQL Analytics API (`firewallEventsAdaptive`), the supported source on all plans:
+
+- **Batching:** up to 10 zones per GraphQL request (Cloudflare's limit), one alias per zone. An error scoped to one zone does not fail the others.
+- **Pagination:** events are read oldest first in pages of `pageSize`; a full page continues from its newest timestamp, so bursts are not truncated.
+- **Overlap + dedupe:** each poll re-reads the last `overlap` seconds to catch events Cloudflare ingests late. Already-dispatched events are skipped by a key of Ray ID, rule, source, action, timestamp and IP (one request can trigger several events). The key set is pruned once events fall out of the overlap window.
+- **Resilience:** every request has a timeout; network errors, timeouts, 429 (honouring `Retry-After`) and 5xx are retried with exponential backoff. Failures reach `onError` as `CloudflareApiError` with `status`, `endpoint` and Cloudflare's `errors`.
+- **Shutdown:** `await watcher.stop()` cancels in-flight requests and the poll sleep.
+
+State is in memory per watcher instance; on restart the watcher reads the last `lookbackMinutes` again.
+
+### Python
+
+The Python package tries Cloudflare's endpoints in this order, stopping at the first success:
 
 ```
 1. GET /zones/{id}/security/events      (REST — newer plans)
@@ -197,9 +226,7 @@ Both packages try Cloudflare's endpoints in this order, stopping at the first su
 3. POST /graphql  firewallEventsAdaptive (GraphQL — all plans)
 ```
 
-GraphQL field names are normalized to match REST field names before they reach your handler, so `SecurityEvent` always has the same shape regardless of which endpoint responded.
-
-The GraphQL query adapts automatically per zone: `ruleMessage` is requested if the zone supports it (Enterprise), and silently dropped for zones that don't. This is detected on the first poll and cached for the lifetime of the watcher instance.
+GraphQL field names are normalized to match REST field names before they reach your handler.
 
 Deduplication is in-memory per watcher instance using the `occurred_at` timestamp of the last seen event. State is not persisted — on restart, the watcher fetches events from the last `lookback_minutes` window.
 
@@ -216,7 +243,8 @@ python -m pytest tests/ -v
 # TypeScript
 cd packages/npm
 npm install
+npm test
 npm run build
 ```
 
-Python tests cover `CloudFlareWatcher` construction, event handler registration, timestamp parsing, event mapping, dispatch error isolation, and the internal API client. Run them before submitting changes.
+TypeScript tests (Vitest) cover batching, pagination, overlap and dedupe, retries and timeouts, field discovery, validation and shutdown against a fake Cloudflare API. Python tests cover `CloudFlareWatcher` construction, event handler registration, timestamp parsing, event mapping, dispatch error isolation, and the internal API client. Run them before submitting changes.
