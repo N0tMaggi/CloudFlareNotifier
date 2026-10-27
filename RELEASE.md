@@ -4,7 +4,17 @@
 
 Releases are triggered by pushing a `v*` tag. The
 [publish-npm workflow](.github/workflows/publish-npm.yml) runs automatically:
-type-checks, builds, and publishes to npm.
+it checks that the tag matches `package.json` and that the version isn't published yet,
+then type-checks, tests, builds, and publishes to npm.
+
+Publishing uses [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC),
+so no npm token is stored in GitHub and every release gets a provenance attestation.
+One-time setup on npmjs.com: package → **Settings** → **Trusted Publisher** → **GitHub Actions**,
+repository `N0tMaggi/CloudFlareNotifier`, workflow `publish-npm.yml`.
+
+If a publish fails after the tag is pushed, fix the cause and start the workflow manually from `main`
+(**Actions → Publish npm → Run workflow**, or `gh workflow run publish-npm.yml --ref main`)
+instead of moving the tag.
 
 Before releasing, move the **Unreleased** entries in [CHANGELOG.md](CHANGELOG.md) under a new version heading.
 
@@ -70,4 +80,4 @@ When ready to publish to PyPI:
 |------|---------|--------------|
 | `ci.yml` | push to `main`, PRs | pytest · mypy · ruff (Py 3.10–3.14) · tsc · Vitest · build (Node 22–26) |
 | `pip-audit.yml` | push, PRs, every Monday | pip-audit + npm audit (GitHub disables the schedule after 60 days without repository activity; re-enable it under Actions) |
-| `publish-npm.yml` | push `v*` tag | typecheck → build → npm publish |
+| `publish-npm.yml` | push `v*` tag, manual | version check → typecheck → test → build → npm publish (OIDC, provenance) |

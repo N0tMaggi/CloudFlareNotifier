@@ -1,17 +1,29 @@
 name: Publish npm
 
+# Publishes via npm Trusted Publishing (OIDC): no npm token is stored in
+# GitHub. The trusted publisher on npmjs.com must name this repository and
+# this workflow file (publish-npm.yml).
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Build & publish to npm
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing and provenance
 
     steps:
       - uses: actions/checkout@v7
@@ -23,6 +35,24 @@ jobs:
           cache: npm
           cache-dependency-path: packages/npm/package-lock.json
 
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Check version is unpublished
+        working-directory: packages/npm
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${VERSION}"
+            exit 1
+          fi
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::${NAME}@${VERSION} is already published"
+            exit 1
+          fi
+
       - name: Install
         working-directory: packages/npm
         run: npm ci
@@ -31,6 +61,10 @@ jobs:
         working-directory: packages/npm
         run: npm run typecheck
 
+      - name: Test
+        working-directory: packages/npm
+        run: npm test
+
       - name: Build
         working-directory: packages/npm
         run: npm run build
@@ -38,5 +72,3 @@ jobs:
       - name: Publish
         working-directory: packages/npm
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
