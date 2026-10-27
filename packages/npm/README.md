@@ -1,5 +1,9 @@
 # @maggidev/cloudflare-notifier
 
+[![npm](https://img.shields.io/npm/v/%40maggidev%2Fcloudflare-notifier)](https://www.npmjs.com/package/@maggidev/cloudflare-notifier)
+[![CI](https://img.shields.io/github/actions/workflow/status/N0tMaggi/CloudFlareNotifier/ci.yml?branch=main&label=CI)](https://github.com/N0tMaggi/CloudFlareNotifier/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/npm/l/%40maggidev%2Fcloudflare-notifier)](https://github.com/N0tMaggi/CloudFlareNotifier/blob/main/LICENSE)
+
 Poll Cloudflare security events from Node.js or TypeScript apps. Register a handler, get called on every new event, and decide what to do next.
 
 ## Install
@@ -16,8 +20,8 @@ Requires Node.js 22.12 or newer. The package has no runtime dependencies.
 import { CloudFlareWatcher, SecurityEvent } from "@maggidev/cloudflare-notifier";
 
 const watcher = new CloudFlareWatcher({
-  apiToken: process.env.CF_API_TOKEN!,
-  zoneIds: ["your_zone_id"],
+  apiToken: process.env.CLOUDFLARE_API_TOKEN!,
+  zoneIds: process.env.CLOUDFLARE_ZONE_IDS!.split(","),
   pollInterval: 60,
   lookbackMinutes: 15,
 });
@@ -86,6 +90,13 @@ Use a scoped Cloudflare API token with read-only permissions:
 
 Scope the token to only the zones/accounts you need. Do not commit credentials; pass them through environment variables or a secrets manager.
 
-## Repository
+## Documentation
 
-Source and Python package: https://github.com/N0tMaggi/CloudFlareNotifier
+- [INSTALL.md](https://github.com/N0tMaggi/CloudFlareNotifier/blob/main/INSTALL.md): creating the API token, environment variables, systemd and Docker, troubleshooting
+- [Project README](https://github.com/N0tMaggi/CloudFlareNotifier#readme): feature overview and the Python package
+- [CHANGELOG.md](https://github.com/N0tMaggi/CloudFlareNotifier/blob/main/CHANGELOG.md)
+- [SECURITY.md](https://github.com/N0tMaggi/CloudFlareNotifier/blob/main/SECURITY.md): reporting vulnerabilities
+
+## License
+
+MIT

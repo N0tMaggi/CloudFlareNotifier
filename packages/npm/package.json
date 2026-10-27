@@ -2,6 +2,7 @@
   "name": "@maggidev/cloudflare-notifier",
   "version": "0.1.9",
   "description": "Poll Cloudflare security events and react to them in Node.js apps.",
+  "author": "Maggi",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "repository": {
@@ -15,11 +16,13 @@
   "homepage": "https://github.com/N0tMaggi/CloudFlareNotifier#readme",
   "keywords": [
     "cloudflare",
-    "security",
-    "firewall",
-    "waf",
     "events",
-    "notifier"
+    "firewall",
+    "graphql",
+    "monitoring",
+    "notifier",
+    "security",
+    "waf"
   ],
   "engines": {
     "node": ">=22.12"

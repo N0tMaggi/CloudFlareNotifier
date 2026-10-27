@@ -1,64 +1,130 @@
 # cloudflare-notifier
 
-[![PyPI](https://img.shields.io/pypi/v/cloudflare-notifier?label=PyPI)](https://pypi.org/project/cloudflare-notifier/)
-[![Python](https://img.shields.io/pypi/pyversions/cloudflare-notifier)](https://pypi.org/project/cloudflare-notifier/)
 [![npm](https://img.shields.io/npm/v/%40maggidev%2Fcloudflare-notifier?label=npm)](https://www.npmjs.com/package/@maggidev/cloudflare-notifier)
 [![npm downloads](https://img.shields.io/npm/dm/%40maggidev%2Fcloudflare-notifier)](https://www.npmjs.com/package/@maggidev/cloudflare-notifier)
-[![CI](https://img.shields.io/github/actions/workflow/status/N0tMaggi/CloudFlareNotifier/pip-audit.yml?label=security+audit)](https://github.com/N0tMaggi/CloudFlareNotifier/actions)
-[![License](https://img.shields.io/github/license/N0tMaggi/CloudFlareNotifier)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/N0tMaggi/CloudFlareNotifier/ci.yml?branch=main&label=CI)](https://github.com/N0tMaggi/CloudFlareNotifier/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/N0tMaggi/CloudFlareNotifier)](LICENSE)
 
-Poll Cloudflare security events in Python or Node.js. Register a handler, get called on every new event. No built-in notifications, no opinions on what you do next.
+**Poll Cloudflare security events from Node.js or Python and react to them in your own code.**
+
+Register a handler, get called once for every new WAF, firewall, rate-limit or bot event across your zones. No built-in notifications, no opinions on what you do next: send it to Slack, write it to a database, block an IP, page someone.
+
+```ts
+watcher.onEvent((event) => {
+  console.log(`[${event.action}] ${event.clientIp} ${event.method} ${event.path} – ${event.ruleMessage}`);
+});
+```
+
+---
+
+## Contents
+
+- [Why](#why)
+- [Features](#features)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Event fields](#event-fields)
+- [How it works](#how-it-works)
+- [Security](#security)
+- [Documentation](#documentation)
+- [License](#license)
 
 ---
 
-## The problem
+## Why
 
-Cloudflare doesn't push security events — you have to poll. Doing this yourself means:
+Cloudflare doesn't push security events, you have to poll the GraphQL Analytics API. Doing that reliably means handling:
 
-- Three different API endpoints depending on your plan (`/security/events`, `/firewall/events`, GraphQL `firewallEventsAdaptive`)
-- Inconsistent field names between REST and GraphQL responses
-- Deduplication logic to avoid re-processing events across restarts
-- Timestamp normalization across different Cloudflare event formats
+- one GraphQL query per zone, or batching them yourself,
+- pagination, so a burst during an attack doesn't truncate results,
+- events that Cloudflare ingests with a delay,
+- duplicates when time windows overlap,
+- timeouts, rate limits (HTTP 429) and transient 5xx errors,
+- schema differences between plans.
 
-This library handles all of that. You write the handler.
+This library does all of that. You write the handler.
 
----
+## Features
+
+| | Node.js / TypeScript | Python |
+|---|:---:|:---:|
+| Callback / event API | ✅ | ✅ |
+| Multiple zones | ✅ batched, 10 per request | ✅ one request per zone |
+| GraphQL Analytics API (`firewallEventsAdaptive`) | ✅ only source | ✅ fallback after REST |
+| Pagination for bursts | ✅ | — |
+| Overlap window and dedupe for late events | ✅ | — |
+| Schema introspection (request only available fields) | ✅ | — |
+| Request timeout | ✅ configurable | ✅ fixed 15 s |
+| Retries with backoff and `Retry-After` | ✅ | — |
+| Typed errors (`CloudflareApiError`) | ✅ | — |
+| Runtime dependencies | none | `aiohttp` |
+
+The TypeScript package is the reference implementation. The Python package will be brought to the same feature set.
 
 ## Install
 
-**Python** (requires 3.10+, one dependency: `aiohttp`):
-```bash
-pip install cloudflare-notifier
-```
+**Node.js** 22.12 or newer:
 
-**Node.js** (requires 22.12+, zero runtime dependencies):
 ```bash
 npm install @maggidev/cloudflare-notifier
 ```
 
----
+**Python** 3.10 or newer. Not on PyPI yet; install from GitHub:
 
-## Usage
+```bash
+pip install "git+https://github.com/N0tMaggi/CloudFlareNotifier.git#subdirectory=packages/python"
+```
+
+You need a Cloudflare API token with **Zone → Zone → Read** and **Zone → Analytics → Read**. [INSTALL.md](INSTALL.md) walks through creating one, configuring environment variables and running the watcher as a service.
+
+## Quick start
+
+### Node.js / TypeScript
+
+```ts
+import { CloudFlareWatcher, CloudflareApiError } from "@maggidev/cloudflare-notifier";
+
+const watcher = new CloudFlareWatcher({
+  apiToken: process.env.CLOUDFLARE_API_TOKEN!,
+  zoneIds: process.env.CLOUDFLARE_ZONE_IDS!.split(","),
+});
+
+watcher.onEvent(async (event) => {
+  console.log(`${event.zoneName}: [${event.action}] ${event.clientIp} (${event.country}) ${event.path}`);
+});
+
+watcher.onError((error) => {
+  if (error instanceof CloudflareApiError) {
+    console.error(`Cloudflare API ${error.endpoint} failed with HTTP ${error.status}`, error.errors);
+  } else {
+    console.error(error);
+  }
+});
+
+process.on("SIGTERM", () => void watcher.stop());
+
+await watcher.start(); // resolves after stop()
+```
+
+Run it server-side only: a Node.js process, an API backend, a worker. Never ship an API token to a browser.
 
 ### Python
 
 ```python
 import asyncio
 import os
+
 from cloudflare_notifier import CloudFlareWatcher, SecurityEvent
 
 watcher = CloudFlareWatcher(
-    api_token=os.environ["CF_API_TOKEN"],
-    zone_ids=["your_zone_id"],
-    poll_interval=60,        # seconds between polls (default: 60)
-    lookback_minutes=15,     # how far back to look on first start (default: 15)
+    api_token=os.environ["CLOUDFLARE_API_TOKEN"],
+    zone_ids=os.environ["CLOUDFLARE_ZONE_IDS"].split(","),
 )
 
 @watcher.on_event
 async def handle(event: SecurityEvent) -> None:
     print(f"{event.zone_name}: [{event.action}] {event.client_ip} ({event.country})")
-    print(f"  rule: {event.rule_message or event.rule_id}")
-    print(f"  ray:  {event.ray_id}")
 
 @watcher.on_error
 async def handle_error(error: Exception) -> None:
@@ -67,184 +133,89 @@ async def handle_error(error: Exception) -> None:
 asyncio.run(watcher.start())
 ```
 
-Multiple handlers and multiple zones are both supported:
+Both packages support multiple handlers. Each handler runs for every event; an exception in one is reported to the error handlers and does not stop the others.
 
-```python
-watcher = CloudFlareWatcher(
-    api_token=os.environ["CF_API_TOKEN"],
-    zone_ids=["zone_id_1", "zone_id_2"],
-)
+## Configuration
 
-@watcher.on_event
-async def log_to_db(event: SecurityEvent) -> None:
-    await db.insert(event.raw)
+| Option | TypeScript | Python | Default | Description |
+|---|---|---|---|---|
+| API token | `apiToken` | `api_token` | — | Recommended authentication |
+| API key | `apiKey` | `api_key` | — | Legacy Global API Key, requires `email` |
+| Email | `email` | `email` | — | Required with the API key |
+| Zone IDs | `zoneIds` | `zone_ids` | required | Zones to watch (32 hex characters each) |
+| Poll interval | `pollInterval` | `poll_interval` | `60` | Seconds between polls |
+| Lookback | `lookbackMinutes` | `lookback_minutes` | `15` | Minutes read on first start (TS: max 44640 = 31 days) |
+| Overlap | `overlap` | — | `300` | Seconds re-read each poll to catch late events |
+| Page size | `pageSize` | — | `1000` | Events per zone and page |
+| Request timeout | `requestTimeout` | — | `15` | Seconds per request |
+| Retries | `maxRetries` | — | `3` | Retries on network errors, timeouts, 429 and 5xx |
+| Custom fetch | `fetch` | — | global `fetch` | For proxies or tests |
+| TLS verification | — | `verify_ssl` | `true` | Python only; never disable in production |
 
-@watcher.on_event
-async def alert_on_block(event: SecurityEvent) -> None:
-    if event.action == "block":
-        await send_alert(event)
-```
+The TypeScript constructor validates every option and throws on invalid values.
 
-### Node.js / TypeScript
+## Event fields
 
-```typescript
-import { CloudFlareWatcher, SecurityEvent } from "@maggidev/cloudflare-notifier";
-
-const watcher = new CloudFlareWatcher({
-    apiToken: process.env.CF_API_TOKEN!,
-    zoneIds: ["your_zone_id"],
-    pollInterval: 60,
-    lookbackMinutes: 15,
-});
-
-watcher.onEvent((event: SecurityEvent) => {
-    console.log(`${event.zoneName}: [${event.action}] ${event.clientIp} (${event.country})`);
-    console.log(`  rule: ${event.ruleMessage || event.ruleId}`);
-    console.log(`  ray:  ${event.rayId}`);
-});
-
-watcher.start();
-```
-
-Stop when needed:
-
-```typescript
-// stop after 10 minutes
-setTimeout(() => watcher.stop(), 10 * 60 * 1000);
-```
-
----
-
-## API Reference
-
-### `CloudFlareWatcher`
-
-| Parameter | Python | TypeScript | Default | Description |
-|-----------|--------|-----------|---------|-------------|
-| API token | `api_token` | `apiToken` | — | Recommended auth method |
-| API key | `api_key` | `apiKey` | — | Legacy — requires `email` |
-| Email | `email` | `email` | — | Required with `api_key` |
-| Zone IDs | `zone_ids` | `zoneIds` | required | List of Cloudflare zone IDs |
-| Poll interval | `poll_interval` | `pollInterval` | `60` | Seconds between polls |
-| Lookback | `lookback_minutes` | `lookbackMinutes` | `15` | Window on first start |
-| SSL verify | `verify_ssl` | — | `true` | Python only — see [Security](#security) |
-| Overlap | — | `overlap` | `300` | TypeScript only — seconds re-read each poll to catch late events |
-| Page size | — | `pageSize` | `1000` | TypeScript only — events per zone and page |
-| Request timeout | — | `requestTimeout` | `15` | Seconds per request (Python: fixed 15) |
-| Retries | — | `maxRetries` | `3` | TypeScript only — retries on network errors, timeouts, 429, 5xx |
-| Fetch | — | `fetch` | global `fetch` | TypeScript only — custom implementation (proxies, tests) |
-
-TypeScript validates zone IDs (32 hex characters) and numeric options in the constructor.
-
-### `SecurityEvent` fields
-
-| Field | Python | TypeScript | Example |
-|-------|--------|-----------|---------|
-| Zone ID | `zone_id` | `zoneId` | `"abc123def456"` |
-| Zone name | `zone_name` | `zoneName` | `"example.com"` |
-| Action | `action` | `action` | `"block"`, `"challenge"`, `"log"` |
-| Source | `source` | `source` | `"firewall"`, `"waf"`, `"rateLimit"` |
-| Client IP | `client_ip` | `clientIp` | `"203.0.113.5"` |
+| Field | TypeScript | Python | Example |
+|---|---|---|---|
+| Zone ID | `zoneId` | `zone_id` | `"023e105f4ecef8ad9ca31a8372d0c353"` |
+| Zone name | `zoneName` | `zone_name` | `"example.com"` |
+| Action | `action` | `action` | `"block"`, `"managed_challenge"`, `"log"` |
+| Source | `source` | `source` | `"firewallManaged"`, `"ratelimit"`, `"bic"` |
+| Client IP | `clientIp` | `client_ip` | `"203.0.113.5"` |
 | Country | `country` | `country` | `"DE"` |
-| Rule ID | `rule_id` | `ruleId` | `"..."` |
-| Rule message | `rule_message` | `ruleMessage` | `"SQLi detected"` ¹ |
-| Ray ID | `ray_id` | `rayId` | `"6e4d7f0abc123456"` |
-| Host | — | `host` | `"shop.example.com"` ² |
-| Method | — | `method` | `"POST"` ² |
-| Path | — | `path` | `"/wp-login.php"` ² |
-| Query | — | `query` | `"?id=1%27"` ² |
-| User agent | — | `userAgent` | `"curl/8.5.0"` ² |
-| ASN | — | `asn` | `"64496"` ² |
-| Timestamp | `occurred_at` | `occurredAt` | `datetime` / `Date \| null` |
-| Raw event | `raw` | `raw` | original dict / object from Cloudflare |
+| Rule ID | `ruleId` | `rule_id` | `"5de7edfa648c4d6891dc3e7f84534ffa"` |
+| Rule description | `ruleMessage` | `rule_message` | `"SQLi - Comment"` |
+| Ray ID | `rayId` | `ray_id` | `"8d1f2a3b4c5d6e7f"` |
+| Host | `host` | — | `"shop.example.com"` |
+| Method | `method` | — | `"POST"` |
+| Path | `path` | — | `"/wp-login.php"` |
+| Query | `query` | — | `"?id=1%27"` |
+| User agent | `userAgent` | — | `"curl/8.5.0"` |
+| ASN | `asn` | — | `"64496"` |
+| Time | `occurredAt` | `occurred_at` | `Date` / `datetime`, or `null` |
+| Raw event | `raw` | `raw` | Original object from Cloudflare |
 
-Fields may be empty strings when Cloudflare omits them — always check before using.
-
-¹ TypeScript fills `ruleMessage` from the GraphQL `description` field. Python still requests `ruleMessage` and leaves it empty when Cloudflare rejects it.
-
-² TypeScript only. On first use the client introspects the GraphQL schema and requests only the fields it exposes; if introspection is unavailable it falls back to a minimal field set. `path`, `query` and `userAgent` are attacker-controlled — escape them before rendering in a dashboard.
-
----
-
-## Auth
-
-Create a token at **Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token**.
-
-Recommended read-only permissions:
-
-- `Zone → Zone → Read` for zone lookup
-- `Zone → Analytics → Read` for security events via GraphQL
-
-Scope the token to only the zones/accounts you need.
-
-The legacy Global API Key (`api_key` + `email`) works but grants full account access — prefer a scoped token.
-
----
-
-## Security
-
-**Keep credentials out of source code.** Use environment variables or a secrets manager:
-
-```python
-# Python
-api_token=os.environ["CF_API_TOKEN"]
-```
-```typescript
-// TypeScript
-apiToken: process.env.CF_API_TOKEN!
-```
-
-**Never set `verify_ssl=False` in production** (Python only). It disables TLS certificate verification entirely and makes your traffic vulnerable to MITM attacks. The library will emit a `UserWarning` if you do.
-
-**The library does not log credentials.** Exceptions from failed requests are logged at WARNING level via the standard `logging` module — they contain zone IDs and HTTP status codes, not tokens or keys.
-
-**Event data may contain personal information** (IP addresses, user agents). Handle it according to the privacy laws that apply to your users.
-
----
+Fields Cloudflare does not return for your plan are empty strings. `path`, `query` and `userAgent` come from the attacker: escape them before rendering them anywhere.
 
 ## How it works
 
 ### TypeScript
 
-Security events come only from the GraphQL Analytics API (`firewallEventsAdaptive`), the supported source on all plans:
+1. On start, zone names are resolved and the GraphQL schema is introspected once, so the query only asks for fields your account exposes.
+2. Every `pollInterval` seconds, one GraphQL request covers up to 10 zones (`firewallEventsAdaptive`, oldest first). An error for one zone doesn't affect the others.
+3. A full page continues from its newest timestamp until the window is read completely.
+4. Each poll starts `overlap` seconds before the end of the previous window, to pick up events Cloudflare ingests late. Events already dispatched are skipped by a key of Ray ID, rule, source, action, time and IP.
+5. Requests time out after `requestTimeout` seconds. Network errors, timeouts, 429 and 5xx responses are retried with exponential backoff, honouring `Retry-After`.
+6. `await watcher.stop()` cancels in-flight requests and the wait between polls.
 
-- **Batching:** up to 10 zones per GraphQL request (Cloudflare's limit), one alias per zone. An error scoped to one zone does not fail the others.
-- **Pagination:** events are read oldest first in pages of `pageSize`; a full page continues from its newest timestamp, so bursts are not truncated.
-- **Overlap + dedupe:** each poll re-reads the last `overlap` seconds to catch events Cloudflare ingests late. Already-dispatched events are skipped by a key of Ray ID, rule, source, action, timestamp and IP (one request can trigger several events). The key set is pruned once events fall out of the overlap window.
-- **Resilience:** every request has a timeout; network errors, timeouts, 429 (honouring `Retry-After`) and 5xx are retried with exponential backoff. Failures reach `onError` as `CloudflareApiError` with `status`, `endpoint` and Cloudflare's `errors`.
-- **Shutdown:** `await watcher.stop()` cancels in-flight requests and the poll sleep.
-
-State is in memory per watcher instance; on restart the watcher reads the last `lookbackMinutes` again.
+State lives in memory. After a restart the watcher reads the last `lookbackMinutes` again, so handlers should tolerate seeing an event twice across restarts.
 
 ### Python
 
-The Python package tries Cloudflare's endpoints in this order, stopping at the first success:
+The Python package tries `GET /zones/{id}/security/events`, then `GET /zones/{id}/firewall/events`, then the GraphQL API, and uses the first that answers. It tracks the newest event time per zone in memory.
 
-```
-1. GET /zones/{id}/security/events      (REST — newer plans)
-2. GET /zones/{id}/firewall/events      (REST — older plans)
-3. POST /graphql  firewallEventsAdaptive (GraphQL — all plans)
-```
+## Security
 
-GraphQL field names are normalized to match REST field names before they reach your handler.
+- Use a scoped API token with read-only permissions, limited to the zones you watch. Avoid the Global API Key.
+- Keep credentials in environment variables or a secrets manager, never in source code or client-side bundles.
+- The libraries never log credentials. Error messages contain endpoints, HTTP status codes and Cloudflare's error messages.
+- Event data contains personal data (IP addresses, user agents). Handle it according to the privacy laws that apply to you.
 
-Deduplication is in-memory per watcher instance using the `occurred_at` timestamp of the last seen event. State is not persisted — on restart, the watcher fetches events from the last `lookback_minutes` window.
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
----
+## Documentation
 
-## Development
+| Document | Contents |
+|---|---|
+| [INSTALL.md](INSTALL.md) | Token setup, environment variables, running as a service, troubleshooting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, commit conventions |
+| [SECURITY.md](SECURITY.md) | Supported versions and how to report vulnerabilities |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [RELEASE.md](RELEASE.md) | How releases are published (maintainers) |
+| [packages/npm](packages/npm/README.md) | npm package README |
+| [packages/python](packages/python/README.md) | Python package README |
 
-```bash
-# Python
-cd packages/python
-pip install -e ".[dev]"
-python -m pytest tests/ -v
+## License
 
-# TypeScript
-cd packages/npm
-npm install
-npm test
-npm run build
-```
-
-TypeScript tests (Vitest) cover batching, pagination, overlap and dedupe, retries and timeouts, field discovery, validation and shutdown against a fake Cloudflare API. Python tests cover `CloudFlareWatcher` construction, event handler registration, timestamp parsing, event mapping, dispatch error isolation, and the internal API client. Run them before submitting changes.
+[MIT](LICENSE) © 2026 Maggi

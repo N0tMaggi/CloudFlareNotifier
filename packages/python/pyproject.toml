@@ -1,15 +1,43 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "cloudflare-notifier"
 version = "0.1.1"
 description = "Poll Cloudflare security events and react to them in Python apps."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Maggi" }]
+keywords = ["cloudflare", "security", "firewall", "waf", "events", "notifier"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Security",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.14",
 ]
+
+[project.urls]
+Homepage = "https://github.com/N0tMaggi/CloudFlareNotifier"
+Documentation = "https://github.com/N0tMaggi/CloudFlareNotifier#readme"
+Changelog = "https://github.com/N0tMaggi/CloudFlareNotifier/blob/main/CHANGELOG.md"
+Issues = "https://github.com/N0tMaggi/CloudFlareNotifier/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cloudflare_notifier"]

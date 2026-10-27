@@ -6,6 +6,8 @@ Releases are triggered by pushing a `v*` tag. The
 [publish-npm workflow](.github/workflows/publish-npm.yml) runs automatically:
 type-checks, builds, and publishes to npm.
 
+Before releasing, move the **Unreleased** entries in [CHANGELOG.md](CHANGELOG.md) under a new version heading.
+
 ### Steps
 
 **1. Bump the version in `packages/npm/package.json`**
@@ -17,7 +19,7 @@ npm version patch --no-git-tag-version --prefix packages/npm
 
 **2. Commit**
 ```bash
-git add packages/npm/package.json
+git add packages/npm/package.json CHANGELOG.md
 git commit -m "chore: bump npm to $(node -p "require('./packages/npm/package.json').version")"
 ```
 
@@ -66,6 +68,6 @@ When ready to publish to PyPI:
 
 | File | Trigger | What it does |
 |------|---------|--------------|
-| `ci.yml` | push to `main`, PRs | pytest · mypy · ruff (Py 3.10–3.12) · tsc (Node 18–22) |
-| `pip-audit.yml` | push, PRs, every Monday | pip-audit + npm audit |
+| `ci.yml` | push to `main`, PRs | pytest · mypy · ruff (Py 3.10–3.14) · tsc · Vitest · build (Node 22–26) |
+| `pip-audit.yml` | push, PRs, every Monday | pip-audit + npm audit (GitHub disables the schedule after 60 days without repository activity; re-enable it under Actions) |
 | `publish-npm.yml` | push `v*` tag | typecheck → build → npm publish |
