@@ -115,7 +115,7 @@ class CloudFlareWatcher:
                         break
                     try:
                         await asyncio.wait_for(stop_event.wait(), timeout=self._poll_interval)
-                    except TimeoutError:
+                    except asyncio.TimeoutError:  # noqa: UP041 – not an alias of TimeoutError on 3.10
                         pass
         finally:
             self._running = False

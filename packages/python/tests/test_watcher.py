@@ -229,3 +229,24 @@ class TestStartStop:
 
         await w.stop()
         await asyncio.wait_for(task, timeout=0.5)
+
+    @pytest.mark.asyncio
+    async def test_keeps_polling_after_interval_elapses(self, monkeypatch):
+        w = CloudFlareWatcher(api_token="tok", zone_ids=["z1"], poll_interval=0.01)
+        polls = []
+
+        class _CountingClient(_FakeClient):
+            async def fetch_security_events(self, zone_id, *, since=None):
+                polls.append(zone_id)
+                if len(polls) >= 3:
+                    await w.stop()
+                return []
+
+        monkeypatch.setattr(
+            watcher_module,
+            "CloudflareConnectionManager",
+            lambda **_: _CountingClient(),
+        )
+
+        await asyncio.wait_for(w.start(), timeout=1)
+        assert len(polls) == 3
