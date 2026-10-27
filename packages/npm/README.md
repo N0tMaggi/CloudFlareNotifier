@@ -8,7 +8,7 @@ Poll Cloudflare security events from Node.js or TypeScript apps. Register a hand
 npm install @maggidev/cloudflare-notifier
 ```
 
-Requires Node.js 18 or newer. The package has no runtime dependencies.
+Requires Node.js 22.12 or newer. The package has no runtime dependencies.
 
 ## Usage
 

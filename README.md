@@ -31,7 +31,7 @@ This library handles all of that. You write the handler.
 pip install cloudflare-notifier
 ```
 
-**Node.js** (requires 18+, zero runtime dependencies):
+**Node.js** (requires 22.12+, zero runtime dependencies):
 ```bash
 npm install @maggidev/cloudflare-notifier
 ```
